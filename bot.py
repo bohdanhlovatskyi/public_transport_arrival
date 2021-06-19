@@ -1,10 +1,10 @@
 import telebot as tb
 from arrival_analysis import get_time_to_arival, UserRequest
-from config import API
+from config import TOKEN
 
 REQUESTS = {}
 
-bot = tb.TeleBot(API)
+bot = tb.TeleBot(TOKEN)
 
 FEATURES = ['Where is that bus?', 'Support']
 ALLOWED_BUSSES = ['18']

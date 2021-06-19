@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 from pprint import pprint
 from google.transit import gtfs_realtime_pb2
+from config import GoogleAPI
 
 
 class UserRequest:
@@ -81,7 +82,7 @@ def get_time_to_arival(req: UserRequest) -> tuple[float, str]:
 
     orig_coord = nearest_stop[-2]
     dest_coord = nearest_bus.vehicle.position.latitude, nearest_bus.vehicle.position.longitude
-    url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins={0}&destinations={1}&mode=transit&language=en-EN&sensor=false&key=AIzaSyC3L0S5P8PDzHEcFqlHAryjcB-419zIaqk".format(f'{orig_coord[0]},{orig_coord[1]}',f'{dest_coord[0]},{dest_coord[1]}')
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins={0}&destinations={1}&mode=transit&language=en-EN&sensor=false&key={2}".format(f'{orig_coord[0]},{orig_coord[1]}',f'{dest_coord[0]},{dest_coord[1]}', GoogleAPI)
     result= simplejson.load(urllib.request.urlopen(url))
 
     return (result['rows'][0]['elements'][0]['duration']['text'], nearest_stop)
