@@ -64,10 +64,13 @@ def _bus_num_handler(msg):
 
 def _handle_location(msg):
     location = (msg.location.latitude, msg.location.longitude)
-    REQUESTS[msg.chat.id].add_bus_location(location)
-    time, bus_stop = get_time_to_arival(REQUESTS[msg.chat.id])
+    REQUESTS[msg.chat.id].add_user_location(location)
+    time, bus_loc, bus_stop = get_time_to_arival(REQUESTS[msg.chat.id])
+    print(bus_loc, bus_stop)
     bot.send_message(msg.chat.id, f'Bus will be at {bus_stop[1]} in {time}')
-    bot.send_location(msg.chat.id, latitude=bus_stop[2], longitude=bus_stop[3]);
+    bot.send_location(msg.chat.id, latitude=bus_loc[0], longitude=bus_loc[1])
+    bot.send_message(msg.chat.id, 'Nearest bus stop location for it:')
+    bot.send_location(msg.chat.id, latitude=bus_stop[2], longitude=bus_stop[3])
 
 if __name__ == '__main__':
     bot.polling()
