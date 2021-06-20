@@ -13,7 +13,15 @@ REQUESTS = {}
 
 bot = tb.TeleBot(TOKEN)
 
-FEATURES = ['Where is that bus?', 'Support']
+bot.set_my_commands([
+    tb.types.BotCommand("/start", "get menu with greetings"),
+    tb.types.BotCommand("/help", "get menu with greetings"),
+    tb.types.BotCommand("/support", "write about a problem"),
+    tb.types.BotCommand("/arrival_time", "get arrival time of certain bus"),
+    tb.types.BotCommand("/stops", "get list of stops for a certain bus"),
+    tb.types.BotCommand("/plot", "get a map with all the specific number buses")
+])
+
 ALLOWED_BUSSES = ['18']
 
 @bot.message_handler(commands=['start', 'help'])
@@ -79,18 +87,16 @@ def callback_query(call: tb.types.CallbackQuery) -> None:
     Handles the callbacks
     '''
 
-    if call.data == "arrival_time":
-        arrival_time_(call.message)
-    elif call.data == "stops":
-        stops(call.message)
-    elif call.data == "plot":
-        plot(call.message)
-    elif call.data == "support":
-        support(call.message)
-    elif call.data == "menu":
-        main_menu(call.message, first_time=False)
-    elif call.data == "other_direction":
-        nearest_bus_info(call.message, direction=1)
+    call_data_mapping = {
+        "arrival_time": arrival_time_,
+        "stops": stops,
+        "plot": plot,
+        "support": support,
+        "other_direction": partial(nearest_bus_info, direction=1),
+        "menu": partial(main_menu, first_time=False)
+    }
+
+    call_data_mapping[call.data](call.message)
 
 def _log_support(msg):
     '''
@@ -105,7 +111,7 @@ def get_bus_num_from_user(msg, handle_next: Callable):
     '''
 
     if (bus_num := msg.json['text']) not in ALLOWED_BUSSES:
-        bot.register_next_step_handler(msg, get_bus_num_from_user)
+        bot.register_next_step_handler(msg, get_bus_num_from_user(handle_next=handle_next))
         if '/' not in msg.json['text']:
             bot.send_message(msg.chat.id, 'Ooooops, something has gone wrong, try again!')
         return
@@ -114,7 +120,8 @@ def get_bus_num_from_user(msg, handle_next: Callable):
     if handle_next is _handle_location:
         REQUESTS[msg.chat.id].add_bus_num(bus_num)
         keyboard = tb.types.ReplyKeyboardMarkup(row_width=1)
-        keyboard.add(tb.types.KeyboardButton('Send Location', request_location=True))
+        keyboard.add(tb.types.KeyboardButton('Send Location', request_location=True),
+                     tb.types.KeyboardButton('Cancel'))
 
         bot.send_message(msg.chat.id, 'Please send us your location', reply_markup=keyboard)
         bot.register_next_step_handler_by_chat_id(msg.chat.id, handle_next)
@@ -136,11 +143,8 @@ def plot_buses(msg):
 
     for bus in buses:
         coords = [bus.vehicle.position.latitude, bus.vehicle.position.longitude]
-        print(coords)
         folium.CircleMarker(coords, radius=1,
                     color='#0080bb', fill_color='#0080bb').add_to(buses_map)
-
-    buses_map.save('buses.html')
 
     buses_map.save('buses_map.html')
     html_file = open('buses_map.html', 'rb')
@@ -154,7 +158,11 @@ def _handle_location(msg):
     Handles receivign location from the user
     '''
 
-    location = (msg.location.latitude, msg.location.longitude)
+    try:
+        location = (msg.location.latitude, msg.location.longitude)
+    except AttributeError: # this means that the user has pressed cancel
+        main_menu(msg, first_time=False)
+        return
     REQUESTS[msg.chat.id].add_user_location(location)
 
     nearest_bus_info(msg, 0)
