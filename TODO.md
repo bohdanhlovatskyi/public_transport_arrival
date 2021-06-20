@@ -1,0 +1,7 @@
+- add other-direction button
+- add bus_stops list
+- add possibility to call function without start feature - add function with methods as wrappers
+- add cancel feature for send location
+- add mongodb :
+  - for each user the last 5 searches shoudl be stored
+  - recent searches button

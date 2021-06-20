@@ -34,6 +34,11 @@ class UserRequest:
 
 
 def get_current_feed() -> gtfs_realtime_pb2.FeedMessage:
+    '''
+    Gets a file with info from the government site. Parses it according
+    to the standart for such files developed by Google
+    '''
+
     feed = gtfs_realtime_pb2.FeedMessage()
     # requests will fetch the results from a url
     response = requests.get('http://track.ua-gis.com/gtfs/lviv/vehicle_position')
@@ -41,27 +46,26 @@ def get_current_feed() -> gtfs_realtime_pb2.FeedMessage:
     
     return feed
 
-def get_route_id(bus_num: str) -> int:
+def get_route_id(request: UserRequest) -> int:
     
     # gets the info about routes
     df = pd.read_csv('data/routes.txt')
-    df = df[df['route_short_name'] == f'А{bus_num}']
+    df = df[df['route_short_name'] == f'А{request.bus_num}']
     return int(df.iloc[0][0])
 
 
-def get_spots(request: UserRequest):
+def get_spots(request: UserRequest) -> pd.DataFrame:
     '''
-    Returns the nearest spot
+    Returns the spots, sorted by their distance to the given coordinates by the user
     '''
 
     df = pd.read_csv('data/stops.txt')
+    bus_stops_names, bus_stops_ids = get_all_the_stops(request.bus_num)
+    df = df.loc[df['stop_id'].isin(bus_stops_ids)]
+
     df['coords'] = list(zip(df['stop_lat'], df['stop_lon']))
     df['distances'] = [mpu.haversine_distance(request.loc, coords) for coords in df['coords']]
     df = df.sort_values(by='distances')
-    print(df)
-
-    bus_stops_names, bus_stops_ids = get_all_the_stops(request.bus_num)
-    df = df.loc[df['stop_id'].isin(bus_stops_ids)]
 
     return df
 
@@ -80,7 +84,10 @@ def get_nearest_spot(request: UserRequest) -> Tuple[str, str, float, float, Tupl
     return nearest_stop[2:]
 
 def get_all_the_stops(bus_number: int) -> Tuple[list[str], list[int]]:
-    
+    '''
+    Parses several files to get list of spots for certain bus
+    '''
+
     routes = pd.read_csv('data/routes.txt')
 
     route_id = routes[routes['route_short_name'] == f'А{bus_number}'].iloc[0][0]
@@ -105,37 +112,44 @@ def get_all_the_stops(bus_number: int) -> Tuple[list[str], list[int]]:
         
     return stop_names, some_trip_stops
 
-def get_time_to_arival(req: UserRequest) -> tuple[float, str]:
-    
+def get_time_to_arival(req: UserRequest, direction: int = 0) -> tuple[float, str]:
+
     feed = get_current_feed()
 
-    bus_id = get_route_id(req.bus_num)
+    bus_id = get_route_id(req)
     nearest_stop = get_nearest_spot(req)
 
     buses = [bus for bus in feed.entity if bus.vehicle.trip.route_id == str(bus_id)]
+    
+    trips_description = pd.read_csv('data/trips.txt')
 
     distances = {}
     for bus in buses:
         coords = [bus.vehicle.position.latitude, bus.vehicle.position.longitude]
-        distances[bus.id] = mpu.haversine_distance(nearest_stop[-2], coords)
+        trip = trips_description[trips_description['trip_id'] == bus.vehicle.trip.trip_id].iloc[0]
+        trip_direction = int(trip['direction_id'])
+        if direction != trip_direction:
+            continue
+        headsign = trip['trip_headsign']
+        distances[bus.id] = (mpu.haversine_distance(nearest_stop[-2], coords), headsign)
 
-    distances = sorted(distances.items(), key=lambda x: x[1])
+    nearest_bus_info = sorted(distances.items(), key=lambda x: x[1][0])[0]
 
-    nearest_bus_id = distances[0][0]
-
+    nearest_bus_id, direction = nearest_bus_info[0], nearest_bus_info[1][1]
 
     nearest_bus = [bus for bus in buses if bus.id == nearest_bus_id][0]
-
     orig_coord = nearest_stop[-2]
     dest_coord = nearest_bus.vehicle.position.latitude, nearest_bus.vehicle.position.longitude
-
     url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins={0}&destinations={1}&mode=transit&language=en-EN&sensor=false&key={2}".format(f'{orig_coord[0]},{orig_coord[1]}',f'{dest_coord[0]},{dest_coord[1]}', GoogleAPI)
     result= simplejson.load(urllib.request.urlopen(url))
 
-    return (result['rows'][0]['elements'][0]['duration']['text'], dest_coord, nearest_stop)
+    return result['rows'][0]['elements'][0]['duration']['text'], dest_coord, nearest_stop, direction
 
 if __name__ == '__main__':
     req = UserRequest()
     req.add_bus_num(18)
     req.add_user_location((49.809545, 23.988369))
+
     res = get_time_to_arival(req)
+
+    print(res)
