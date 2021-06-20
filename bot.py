@@ -1,7 +1,12 @@
 from typing import Callable
 from functools import partial
 import telebot as tb
-from arrival_analysis import get_time_to_arival, UserRequest, get_all_the_stops
+import io
+import os
+from PIL import Image
+import folium
+from arrival_analysis import get_time_to_arival, UserRequest, get_all_the_stops, get_current_feed,\
+                            get_route_id
 from config import TOKEN
 
 REQUESTS = {}
@@ -12,25 +17,25 @@ FEATURES = ['Where is that bus?', 'Support']
 ALLOWED_BUSSES = ['18']
 
 @bot.message_handler(commands=['start', 'help'])
-def greetings(msg: tb.types.Message, first_time: bool = True) -> None:
+def main_menu(msg: tb.types.Message, first_time: bool = True) -> None:
     '''
-    Greetings-function that will give the user an ability to choose what he wants to
+    main_menu-function that will give the user an ability to choose what he wants to
     discover via custom keyboard.
     '''
 
     # prepares the keyboard
     markup = tb.types.InlineKeyboardMarkup(row_width=2)
-    markup.add(tb.types.InlineKeyboardButton('Where is that bus?', callback_data='bus_location'),
+    markup.add(tb.types.InlineKeyboardButton('Where is that bus?', callback_data='arrival_time'),
                tb.types.InlineKeyboardButton('Bus\' stops', callback_data='stops'),
-               tb.types.InlineKeyboardButton('Bus on map', callback_data='plot'),
+               tb.types.InlineKeyboardButton('Bus on map', callback_data="plot"),
                tb.types.InlineKeyboardButton('Support', callback_data='support'))
 
     if first_time:
-        # prepares the greetings message
-        greetings_str = f'''Greetings, {msg.from_user.first_name}.
+        # prepares the main_menu message
+        main_str = f'''Greetings, {msg.from_user.first_name}.
 The bot currently supports such features:
 - where is a bus that you would specify and how long would you have to wait for it'''
-        bot.send_message(msg.chat.id, greetings_str, reply_markup=markup)
+        bot.send_message(msg.chat.id, main_str, reply_markup=markup)
     else:
         bot.send_message(msg.chat.id, 'What you\'d like to do?', reply_markup=markup)
     bot.send_sticker(msg.chat.id, 'CAACAgIAAxkBAAEBdaRgza6qS-oE30b9jDb8VSXLjF8XggACEQADdahyE0TO3mRyQA8bHwQ')
@@ -39,28 +44,51 @@ The bot currently supports such features:
     # TODO: reinitialises user when the function is called
     REQUESTS[msg.chat.id] = UserRequest()
 
+@bot.message_handler(commands=['arrival_time'])
+def arrival_time_(msg):
+    # TODO: depricated
+    REQUESTS[msg.chat.id] = UserRequest()
+    bot.send_message(msg.chat.id, 'Please type what exactly bus do you want to find')
+    location_handler = partial(get_bus_num_from_user, handle_next=_handle_location)
+    bot.register_next_step_handler(msg, location_handler)
+
+@bot.message_handler(commands=['stops'])
+def stops(msg):
+    # TODO: depricated
+    REQUESTS[msg.chat.id] = UserRequest()
+    bot.send_message(msg.chat.id, 'Please type what exactly bus do you want to find')
+    stops_handler = partial(get_bus_num_from_user, handle_next=print_stops)
+    bot.register_next_step_handler(msg, stops_handler)
+
+@bot.message_handler(commands=['support'])
+def support(msg):
+    REQUESTS[msg.chat.id] = UserRequest()
+    bot.send_message(msg.chat.id, 'What exaclty problem has occured? We would definetely look into it')
+    bot.register_next_step_handler(msg, _log_support)
+
+@bot.message_handler(commands=['plot'])
+def plot(msg):
+    REQUESTS[msg.chat.id] = UserRequest()
+    bot.send_message(msg.chat.id, 'Please type what exactly bus do you want to find')
+    stops_handler = partial(get_bus_num_from_user, handle_next=plot_buses)
+    bot.register_next_step_handler(msg, stops_handler)
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call: tb.types.CallbackQuery) -> None:
     '''
-    Handles the callback
+    Handles the callbacks
     '''
 
-    if call.data == "bus_location":
-        bot.send_message(call.message.chat.id, 'Please type what exactly bus do you want to find')
-        location_handler = partial(_bus_num_handler, handle_next=_handle_location)
-        bot.register_next_step_handler(call.message, location_handler)
+    if call.data == "arrival_time":
+        arrival_time_(call.message)
     elif call.data == "stops":
-        bot.send_message(call.message.chat.id, 'Please type what exactly bus do you want to find')
-        stops_handler = partial(_bus_num_handler, handle_next=print_stops)
-        bot.register_next_step_handler(call.message, stops_handler)
+        stops(call.message)
     elif call.data == "plot":
-        pass
+        plot(call.message)
     elif call.data == "support":
-        bot.send_message(call.message.chat.id, 'What exaclty problem has occured? We would definetely look into it')
-        bot.register_next_step_handler(call.message, _log_support)
+        support(call.message)
     elif call.data == "menu":
-        # TODO: why this does not work ???
-        greetings(call.message, first_time=False)
+        main_menu(call.message, first_time=False)
     elif call.data == "other_direction":
         nearest_bus_info(call.message, direction=1)
 
@@ -71,13 +99,13 @@ def _log_support(msg):
 
     print(msg.json['text'])
 
-def _bus_num_handler(msg, handle_next: Callable):
+def get_bus_num_from_user(msg, handle_next: Callable):
     '''
     Receives number of bus from the user
     '''
 
     if (bus_num := msg.json['text']) not in ALLOWED_BUSSES:
-        bot.register_next_step_handler(msg, _bus_num_handler)
+        bot.register_next_step_handler(msg, get_bus_num_from_user)
         if '/' not in msg.json['text']:
             bot.send_message(msg.chat.id, 'Ooooops, something has gone wrong, try again!')
         return
@@ -90,9 +118,36 @@ def _bus_num_handler(msg, handle_next: Callable):
 
         bot.send_message(msg.chat.id, 'Please send us your location', reply_markup=keyboard)
         bot.register_next_step_handler_by_chat_id(msg.chat.id, handle_next)
-    elif handle_next is print_stops:
+    elif handle_next in [print_stops, plot_buses]:
         REQUESTS[msg.chat.id].add_bus_num(bus_num)
-        print_stops(msg)
+        handle_next(msg)
+
+def plot_buses(msg):
+    '''
+    I know, I know...
+    '''
+
+    feed = get_current_feed()
+    bus_id = get_route_id(REQUESTS[msg.chat.id])
+
+    buses = [bus for bus in feed.entity if bus.vehicle.trip.route_id == str(bus_id)]
+
+    buses_map = folium.Map(location=[49.842957, 24.03111], zoom_start=12, tiles='cartodbpositron')
+
+    for bus in buses:
+        coords = [bus.vehicle.position.latitude, bus.vehicle.position.longitude]
+        print(coords)
+        folium.CircleMarker(coords, radius=1,
+                    color='#0080bb', fill_color='#0080bb').add_to(buses_map)
+
+    buses_map.save('buses.html')
+
+    buses_map.save('buses_map.html')
+    html_file = open('buses_map.html', 'rb')
+
+    response = bot.send_document(chat_id=msg.chat.id, data=html_file, caption='html-map')
+    os.remove('buses_map.html')
+
 
 def _handle_location(msg):
     '''
