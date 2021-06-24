@@ -149,7 +149,7 @@ def plot_buses(msg):
     buses_map.save('buses_map.html')
     html_file = open('buses_map.html', 'rb')
 
-    response = bot.send_document(chat_id=msg.chat.id, data=html_file, caption='html-map')
+    bot.send_document(chat_id=msg.chat.id, data=html_file, caption='html-map')
     os.remove('buses_map.html')
 
 
